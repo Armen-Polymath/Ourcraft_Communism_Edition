@@ -1,0 +1,21 @@
+name: Ourcraft
+version: '1.0-alpha'
+main: me.polymath.OurCraft
+api-version: '1.21'
+authors: [ Armen Hovhannisyan ]
+
+
+commands:
+  share:
+    description: Enable shared survival state for all online players.
+    usage: /share
+    permission: ourcraft.admin
+  unshare:
+    description: Disable shared survival state for all online players.
+    usage: /unshare
+    permission: ourcraft.admin
+
+permissions:
+  ourcraft.admin:
+    description: Allows enabling/disabling sharing.
+    default: op
