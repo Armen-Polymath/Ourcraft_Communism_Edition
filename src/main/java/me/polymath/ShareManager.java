@@ -12,9 +12,6 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.potion.PotionEffect;
-import org.bukkit.event.EventPriority;
-import org.bukkit.event.block.BlockBreakEvent;
-import org.bukkit.event.block.BlockPlaceEvent;
 
 import java.util.*;
 
@@ -29,29 +26,13 @@ public final class ShareManager implements Listener {
     private int sharedFingerprint = 0;
     private int lastAppliedFingerprint = Integer.MIN_VALUE;
 
-
-    // Used to prevent recursion / event spam from our own applications
-    private boolean applyingSync = false;
+    private boolean debug = false; // set false to silence
+    private void dbg(String msg) {
+        if (debug) plugin.getLogger().info("[ShareDebug] " + msg);
+    }
 
     public ShareManager(JavaPlugin plugin) {
         this.plugin = plugin;
-    }
-
-
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onBlockPlace(BlockPlaceEvent event) {
-        if (!sharing) return;
-
-        // Run 1 tick later so the server has fully applied inventory changes
-        Bukkit.getScheduler().runTask(plugin, () -> adoptAndBroadcast(event.getPlayer()));
-    }
-
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onBlockBreak(BlockBreakEvent event) {
-        if (!sharing) return;
-
-        // Run 1 tick later so tool damage / drops etc settle
-        Bukkit.getScheduler().runTask(plugin, () -> adoptAndBroadcast(event.getPlayer()));
     }
 
     public void startSharingAndClearAll(CommandSender sender) {
@@ -144,22 +125,26 @@ public final class ShareManager implements Listener {
 
             SharedState candidate = SharedState.capture(p);
             if (candidate.fingerprint != sharedFingerprint) {
+                int old = sharedFingerprint;
+
+                dbg("SYNC adopting candidate from " + p.getName()
+                        + " oldFp=" + old
+                        + " newFp=" + candidate.fingerprint);
+
                 sharedState = candidate;
                 sharedFingerprint = candidate.fingerprint;
-                break; // "last change wins" (first change detected this tick)
+
+                break;
             }
         }
 
         // 2) Apply ONLY if state changed since last time
         if (sharedFingerprint != lastAppliedFingerprint) {
-            applyingSync = true;
-            try {
-                for (Player p : players) {
-                    if (p == null || !p.isOnline()) continue;
-                    sharedState.applyTo(p);
-                }
-            } finally {
-                applyingSync = false;
+            dbg("SYNC applying sharedFp=" + sharedFingerprint + " to " + players.size() + " players");
+
+            for (Player p : players) {
+                if (p == null || !p.isOnline()) continue;
+                sharedState.applyTo(p);
             }
 
             lastAppliedFingerprint = sharedFingerprint;
@@ -205,27 +190,6 @@ public final class ShareManager implements Listener {
         p.setExp(0.0f);
         p.setLevel(0);
         p.setTotalExperience(0);
-    }
-
-    private void adoptAndBroadcast(Player source) {
-        if (!sharing || source == null || !source.isOnline()) return;
-
-        SharedState candidate = SharedState.capture(source);
-        sharedState = candidate;
-        sharedFingerprint = candidate.fingerprint;
-
-        applyingSync = true;
-        try {
-            for (Player p : Bukkit.getOnlinePlayers()) {
-                if (p == null || !p.isOnline()) continue;
-                sharedState.applyTo(p);
-                p.updateInventory();
-            }
-        } finally {
-            applyingSync = false;
-        }
-
-        lastAppliedFingerprint = sharedFingerprint; // <--- add this
     }
 
     /**
