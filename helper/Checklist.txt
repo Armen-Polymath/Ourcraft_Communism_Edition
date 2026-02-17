@@ -1,0 +1,157 @@
+Setup sanity
+
+ Test far from spawn (spawn-protection off or you’re outside it).
+
+ All players in Survival (not Adventure/Spectator).
+
+ Run /share and confirm:
+
+ Everyone’s inventory (incl. armor + offhand) is cleared
+
+ Everyone’s effects are cleared
+
+ Health/food/air reset as expected
+
+Inventory sharing
+
+ Pick up items from ground (player A picks up) → appears for all
+
+ Pick up items (player B picks up) → appears for all
+
+ Stack counts match perfectly across all players
+
+ Crafting: craft planks/tools → result + ingredient consumption syncs
+
+ Split stacks (right-click) → all players match
+
+ Move items between slots/hotbar → all players match
+
+ Drop items (Q) → removed for all (and only one dropped entity appears)
+
+ Throw entire stack (Ctrl+Q) → removed for all
+
+ Offhand swap (F) → all players match
+
+ Equip/unequip armor → all players match
+
+ Break a tool by using it → tool breaks for all
+
+Block interactions
+
+ Place blocks (A places) → stack decreases for all, block placed once
+
+ Place blocks (B places) → same
+
+ Break blocks (A breaks) → drop appears, pickup sync works
+
+ Break blocks (B breaks) → same
+
+ Use blocks with states:
+
+ Doors/trapdoors/levers/buttons
+
+ Chests (open + move items inside; inventory stays synced)
+
+ Furnace: insert fuel/smelt + take output
+
+ Anvil: rename/repair (XP + item damage sync)
+
+ Crafting table (grid actions don’t desync)
+
+Hunger / saturation / exhaustion
+
+ Sprint until hunger drops → everyone’s hunger drops together
+
+ Jump/sprint a lot → exhaustion/saturation behavior matches for all
+
+ Eat food (A eats) → hunger/saturation changes for all, item consumed for all
+
+ Eat food (B eats) → same
+
+ Use suspicious stew / special foods → effects sync
+
+Health / damage / healing
+
+ Fall damage on A → everyone takes same health reduction
+
+ Fall damage on B → same
+
+ Mob hits A → everyone loses hearts similarly
+
+ Mob hits B → same
+
+ Regeneration (natural) occurs → all heal together
+
+ Use healing item (golden apple / potion) → health/effects sync
+
+ Totem of Undying (if you want this shared) → triggers consistently (note: can be weird if multiple would “die” at once)
+
+Potion/status effects
+
+ Drink potion (speed/strength) → effect appears for all with same duration/amplifier
+
+ Splash potion on one player → applies to all
+
+ Milk bucket clears effects → clears for all
+
+ Negative effects:
+
+ Poison / Wither
+
+ Slowness / Weakness
+
+ Blindness / Darkness
+
+ Fire Resistance + standing in fire/lava → sync looks consistent
+
+Air / drowning
+
+ A stays underwater until air drops → everyone’s air drops
+
+ A starts drowning → everyone takes drowning damage
+
+ B surfaces → air returns for all
+
+Fire / freeze
+
+ A catches fire → everyone burns (fire ticks sync)
+
+ A extinguishes (water) → everyone stops burning
+
+ Freeze in powdered snow → freeze ticks sync (everyone freezes together)
+
+XP sharing
+
+ Collect XP orbs (A picks) → levels/exp bar match for all
+
+ Spend XP (anvil/enchant) → decreases for all
+
+Join/leave behavior
+
+ Player joins while sharing is active:
+
+ They get cleared (as designed)
+
+ Within a tick, they match the shared state
+
+ Player leaves while sharing:
+
+ Remaining players continue normally
+
+ Run /unshare:
+
+ Everyone gets cleared again (as designed)
+
+ After /unshare, states are no longer linked
+
+“Smoothness / no bugs” checks
+
+ No item duplication
+
+ No “ghost items” (items snap back / disappear)
+
+ No “ghost blocks” (block appears then reverts)
+
+ No console spam / errors
+
+ No noticeable lag spikes with 2–5 players

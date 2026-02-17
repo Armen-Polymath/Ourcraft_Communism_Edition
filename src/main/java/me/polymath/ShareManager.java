@@ -299,14 +299,12 @@ public final class ShareManager implements Listener {
             result = 31 * result + Integer.hashCode(fireTicks);
             result = 31 * result + Integer.hashCode(freezeTicks);
             result = 31 * result + Float.hashCode(fallDistance);
-
             result = 31 * result + Integer.hashCode(noDamageTicks);
 
             result = 31 * result + Integer.hashCode(level);
             result = 31 * result + Float.hashCode(exp);
             result = 31 * result + Integer.hashCode(totalExp);
 
-            // effects hash (order-independent)
             int eff = 0;
             for (PotionEffect e : effects) eff += e.hashCode();
             result = 31 * result + eff;
