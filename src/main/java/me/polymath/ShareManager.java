@@ -1,10 +1,8 @@
 package me.polymath;
 
 import org.bukkit.Bukkit;
-import org.bukkit.GameMode;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
-import org.bukkit.attribute.Attribute;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -14,6 +12,9 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.potion.PotionEffect;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockPlaceEvent;
 
 import java.util.*;
 
@@ -24,11 +25,33 @@ public final class ShareManager implements Listener {
     private boolean sharing = false;
     private int taskId = -1;
 
+    private SharedState sharedState = null;
+    private int sharedFingerprint = 0;
+    private int lastAppliedFingerprint = Integer.MIN_VALUE;
+
+
     // Used to prevent recursion / event spam from our own applications
     private boolean applyingSync = false;
 
     public ShareManager(JavaPlugin plugin) {
         this.plugin = plugin;
+    }
+
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBlockPlace(BlockPlaceEvent event) {
+        if (!sharing) return;
+
+        // Run 1 tick later so the server has fully applied inventory changes
+        Bukkit.getScheduler().runTask(plugin, () -> adoptAndBroadcast(event.getPlayer()));
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBlockBreak(BlockBreakEvent event) {
+        if (!sharing) return;
+
+        // Run 1 tick later so tool damage / drops etc settle
+        Bukkit.getScheduler().runTask(plugin, () -> adoptAndBroadcast(event.getPlayer()));
     }
 
     public void startSharingAndClearAll(CommandSender sender) {
@@ -40,6 +63,12 @@ public final class ShareManager implements Listener {
         // Clear everyone first (as requested)
         for (Player p : Bukkit.getOnlinePlayers()) {
             clearAll(p);
+        }
+
+        Player seed = Bukkit.getOnlinePlayers().stream().findFirst().orElse(null);
+        if (seed != null) {
+            sharedState = SharedState.capture(seed);
+            sharedFingerprint = sharedState.fingerprint;
         }
 
         sharing = true;
@@ -103,24 +132,37 @@ public final class ShareManager implements Listener {
         List<Player> players = new ArrayList<>(Bukkit.getOnlinePlayers());
         if (players.isEmpty()) return;
 
-        // Choose a source player (first online) each tick.
-        Player source = players.get(0);
-        if (!source.isOnline()) return;
+        // If somehow not initialized, seed from first online player
+        if (sharedState == null) {
+            sharedState = SharedState.capture(players.get(0));
+            sharedFingerprint = sharedState.fingerprint;
+        }
 
-        SharedState state = SharedState.capture(source);
+        // 1) Detect changes: if ANY player differs from shared snapshot, adopt their state
+        for (Player p : players) {
+            if (p == null || !p.isOnline()) continue;
 
-        applyingSync = true;
-        try {
-            for (Player target : players) {
-                if (target == null || !target.isOnline()) continue;
-                if (target.equals(source)) continue;
-
-                // Optional: only sync survival-like modes; remove if you want ALL modes
-                // (you said "everything", so we sync regardless of gamemode)
-                state.applyTo(target);
+            SharedState candidate = SharedState.capture(p);
+            if (candidate.fingerprint != sharedFingerprint) {
+                sharedState = candidate;
+                sharedFingerprint = candidate.fingerprint;
+                break; // "last change wins" (first change detected this tick)
             }
-        } finally {
-            applyingSync = false;
+        }
+
+        // 2) Apply ONLY if state changed since last time
+        if (sharedFingerprint != lastAppliedFingerprint) {
+            applyingSync = true;
+            try {
+                for (Player p : players) {
+                    if (p == null || !p.isOnline()) continue;
+                    sharedState.applyTo(p);
+                }
+            } finally {
+                applyingSync = false;
+            }
+
+            lastAppliedFingerprint = sharedFingerprint;
         }
     }
 
@@ -165,6 +207,27 @@ public final class ShareManager implements Listener {
         p.setTotalExperience(0);
     }
 
+    private void adoptAndBroadcast(Player source) {
+        if (!sharing || source == null || !source.isOnline()) return;
+
+        SharedState candidate = SharedState.capture(source);
+        sharedState = candidate;
+        sharedFingerprint = candidate.fingerprint;
+
+        applyingSync = true;
+        try {
+            for (Player p : Bukkit.getOnlinePlayers()) {
+                if (p == null || !p.isOnline()) continue;
+                sharedState.applyTo(p);
+                p.updateInventory();
+            }
+        } finally {
+            applyingSync = false;
+        }
+
+        lastAppliedFingerprint = sharedFingerprint; // <--- add this
+    }
+
     /**
      * Snapshot of the "shared everything" state we can represent using Bukkit/Paper API.
      */
@@ -194,6 +257,8 @@ public final class ShareManager implements Listener {
 
         private final Collection<PotionEffect> effects;
 
+        private final int fingerprint;
+
         private SharedState(
                 ItemStack[] contents,
                 ItemStack[] armor,
@@ -211,7 +276,8 @@ public final class ShareManager implements Listener {
                 int level,
                 float exp,
                 int totalExp,
-                Collection<PotionEffect> effects
+                Collection<PotionEffect> effects,
+                int fingerprint
         ) {
             this.contents = contents;
             this.armor = armor;
@@ -230,12 +296,72 @@ public final class ShareManager implements Listener {
             this.exp = exp;
             this.totalExp = totalExp;
             this.effects = effects;
+            this.fingerprint = fingerprint;
+        }
+
+        private static int computeFingerprint(
+                ItemStack[] contents,
+                ItemStack[] armor,
+                ItemStack offhand,
+                double health,
+                double absorption,
+                int food,
+                float saturation,
+                float exhaustion,
+                int remainingAir,
+                int fireTicks,
+                int freezeTicks,
+                float fallDistance,
+                int noDamageTicks,
+                int level,
+                float exp,
+                int totalExp,
+                Collection<PotionEffect> effects
+        ) {
+            int result = 1;
+
+            result = 31 * result + itemArrayHash(contents);
+            result = 31 * result + itemArrayHash(armor);
+            result = 31 * result + (offhand == null ? 0 : offhand.hashCode());
+
+            result = 31 * result + Double.hashCode(health);
+            result = 31 * result + Double.hashCode(absorption);
+
+            result = 31 * result + Integer.hashCode(food);
+            result = 31 * result + Float.hashCode(saturation);
+            result = 31 * result + Float.hashCode(exhaustion);
+
+            result = 31 * result + Integer.hashCode(remainingAir);
+            result = 31 * result + Integer.hashCode(fireTicks);
+            result = 31 * result + Integer.hashCode(freezeTicks);
+            result = 31 * result + Float.hashCode(fallDistance);
+
+            result = 31 * result + Integer.hashCode(noDamageTicks);
+
+            result = 31 * result + Integer.hashCode(level);
+            result = 31 * result + Float.hashCode(exp);
+            result = 31 * result + Integer.hashCode(totalExp);
+
+            // effects hash (order-independent)
+            int eff = 0;
+            for (PotionEffect e : effects) eff += e.hashCode();
+            result = 31 * result + eff;
+
+            return result;
+        }
+
+        private static int itemArrayHash(ItemStack[] arr) {
+            if (arr == null) return 0;
+            int r = 1;
+            for (ItemStack it : arr) {
+                r = 31 * r + (it == null ? 0 : it.hashCode());
+            }
+            return r;
         }
 
         static SharedState capture(Player p) {
             PlayerInventory inv = p.getInventory();
 
-            // Clone arrays to avoid accidental shared references
             ItemStack[] contents = cloneItemStackArray(inv.getContents());
             ItemStack[] armor = cloneItemStackArray(inv.getArmorContents());
             ItemStack offhand = inv.getItemInOffHand() == null ? null : inv.getItemInOffHand().clone();
@@ -259,8 +385,19 @@ public final class ShareManager implements Listener {
             float exp = p.getExp();
             int totalExp = p.getTotalExperience();
 
-            // Clone effects (PotionEffect is immutable enough for our use, but we copy to be safe)
+            // effects MUST be created before fingerprint
             Collection<PotionEffect> effects = new ArrayList<>(p.getActivePotionEffects());
+
+            int fp = computeFingerprint(
+                    contents, armor, offhand,
+                    health, absorption,
+                    food, saturation, exhaustion,
+                    remainingAir,
+                    fireTicks, freezeTicks, fallDistance,
+                    noDamageTicks,
+                    level, exp, totalExp,
+                    effects
+            );
 
             return new SharedState(
                     contents, armor, offhand,
@@ -270,7 +407,8 @@ public final class ShareManager implements Listener {
                     fireTicks, freezeTicks, fallDistance,
                     noDamageTicks,
                     level, exp, totalExp,
-                    effects
+                    effects,
+                    fp
             );
         }
 
